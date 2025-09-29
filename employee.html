@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Employee Dashboard</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body { background:#f0f2f5; font-family:Arial, sans-serif; }
+    .sidebar{ width:250px; background:#2c3e50; color:white; height:100vh; position:fixed; padding-top:20px; }
+    .sidebar .menu-item{ padding:15px 20px; cursor:pointer; }
+    .sidebar .menu-item.active, .sidebar .menu-item:hover{ background:#34495e; }
+    .main-content{ margin-left:260px; padding:20px; }
+    .personal-overview{ display:flex; flex-direction:column; gap:30px; align-items:center; }
+    .employee-card, .attendance-card, .leave-card{ padding:20px; border-radius:10px; width:350px; text-align:center; }
+    .employee-card img{ width:120px; height:120px; object-fit:cover; border-radius:50%; margin-bottom:10px; }
+    #leaveModal{ position:fixed; top:0;left:0; width:100%;height:100%; background:rgba(0,0,0,0.5); display:none; align-items:center; justify-content:center; }
+    #leaveModal .modal-content{ background:#fff; padding:20px; border-radius:10px; width:300px; }
+    #leaveModal textarea{ width:100%; height:100px; margin-bottom:10px; padding:5px; }
+    #leaveModal button{ margin-right:10px; }
+    #editModal{ display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); align-items:center; justify-content:center; }
+    #editModal .modal-box{ background:#fff; padding:20px; border-radius:10px; width:300px; }
+    #editModal input{ width:100%; margin-bottom:10px; padding:5px; }
+    table{ width:100%; border-collapse:collapse; margin-top:20px; }
+    table th, table td{ border:1px solid #ccc; padding:8px; text-align:center; }
+    table th{ background:#eee; }
+  </style>
+</head>
+<body>
+
+  <div class="sidebar">
+    <div class="menu-item active" data-page="personal-overview" onclick="setActive(this)">Personal Overview</div>
+    <div class="menu-item" data-page="attendance-tracking" onclick="setActive(this)">Attendance Tracking</div>
+    <div class="menu-item" data-page="payroll" onclick="setActive(this)">Payroll</div>
+    <div class="menu-item" data-page="performance" onclick="setActive(this)">Performance</div>
+  </div>
+
+  <div class="main-content">
+    <div id="page-content"></div>
+  </div>
+
+  <!-- Leave Modal -->
+  <div id="leaveModal">
+    <div class="modal-content">
+      <h3>Apply Leave</h3>
+      <textarea id="leave-reason" placeholder="Enter reason"></textarea>
+      <div>
+        <button onclick="submitLeave()">Submit</button>
+        <button onclick="closeLeaveModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit Profile Modal -->
+  <div id="editModal">
+    <div class="modal-box">
+      <h3>Edit Profile</h3>
+      <input id="edit-name" type="text" placeholder="Name">
+      <input id="edit-email" type="email" placeholder="Email">
+      <input id="edit-role" type="text" placeholder="Role">
+      <input id="edit-image" type="file" accept="image/*">
+      <div>
+        <button onclick="submitEdit()">Save</button>
+        <button onclick="closeEditModal()">Cancel</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+  function setActive(elem){
+    document.querySelectorAll('.sidebar .menu-item').forEach(i=>i.classList.remove('active'));
+    elem.classList.add('active');
+    loadPage(elem.dataset.page);
+  }
+
+  async function loadPage(page){
+    const content = document.getElementById('page-content');
+
+    if(page === 'personal-overview'){
+      try{
+        const res = await fetch('/api/users');
+        const users = await res.json();
+        const user = users[0];
+
+        content.innerHTML = `
+          <h2>Personal Overview</h2>
+          <div class="personal-overview">
+            <div class="employee-card">
+              <img src="${user.image}" alt="Profile Picture">
+              <h4>${user.name}</h4>
+              <p><strong>Email:</strong> ${user.email}</p>
+              <p><strong>Role:</strong> ${user.role}</p>
+              <button onclick="openEditModal(${user.id}, '${user.name}', '${user.email}', '${user.role}')">Edit Profile</button>
+            </div>
+            <div class="attendance-card">
+              <h4>Attendance This Month</h4>
+              <canvas id="attendanceChart" width="300" height="300"></canvas>
+            </div>
+          </div>
+        `;
+        loadAttendanceChart('attendanceChart','pie'); 
+      }catch(err){ content.innerHTML="<p>Error loading profile or chart.</p>"; console.error(err);}
+    } 
+    else if(page === 'attendance-tracking'){
+      const today = new Date();
+      const day = today.getDay(); 
+      const todayStr = today.toISOString().split('T')[0];
+      let infoMsg = day === 0 ? "Today is Sunday. Attendance not allowed." : "Mark your attendance for today.";
+
+      const res2 = await fetch('/api/my_approved_leaves');
+      const approvedLeaves = await res2.json();
+      let leaveHtml = '';
+      if(approvedLeaves.length > 0){
+        leaveHtml = `<h4>Approved Leaves</h4>`;
+        approvedLeaves.forEach(l => {
+          const dateStr = new Date(l.approved_date).toLocaleDateString();
+          leaveHtml += `<p>Your leave on ${l.date} was approved on ${dateStr}</p>`;
+        });
+      }
+
+      content.innerHTML = `
+        <h2>Attendance Tracking</h2>
+        <p id="today-info">${infoMsg}</p>
+        <div id="attendance-buttons" style="margin-bottom:20px;">
+          <button id="present-btn" ${day===0?'disabled':''}>Present</button>
+          <button id="leave-btn" ${day===0?'disabled':''}>Apply Leave</button>
+        </div>
+        <div class="attendance-card">
+          <h4>Monthly Attendance</h4>
+          <canvas id="monthlyChart" width="400" height="300"></canvas>
+        </div>
+        <div class="leave-card">
+          ${leaveHtml}
+        </div>
+      `;
+
+      document.getElementById('present-btn').onclick = async () => {
+        const res = await fetch('/mark_attendance', { 
+          method:'POST',
+          headers:{'Content-Type':'application/json'},
+          body:JSON.stringify({status:'Present', date: todayStr})
+        });
+        const data = await res.json();
+        alert(data.message);
+        loadAttendanceChart('monthlyChart','bar');
+      }
+
+      document.getElementById('leave-btn').onclick = () => { 
+        document.getElementById('leaveModal').style.display='flex'; 
+      }
+
+      loadAttendanceChart('monthlyChart','bar');
+    }
+    else if(page === 'leave-management'){
+      content.innerHTML = `<h2>Leave Management</h2><p>Coming soon...</p>`;
+    } 
+    else if(page === 'payroll'){
+      try{
+        const res = await fetch('/api/my_payroll');
+        const payrolls = await res.json();
+
+        let html = `<h2>My Payroll</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>Month</th><th>Basic</th><th>Bonus</th><th>Total</th><th>Status</th><th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>`;
+
+
+        if(payrolls.length === 0){
+          html += `<tr><td colspan="5" style="text-align:center;">No payroll records found</td></tr>`;
+        } else {
+          payrolls.forEach(p=>{
+         html += `<tr>
+  <td>${p.month}</td>
+  <td>${p.basic}</td>
+  <td>${p.bonus}</td>
+  <td>${p.total}</td>
+  <td style="color:${p.status==='Paid'?'green':'orange'}; font-weight:bold;">${p.status}</td>
+  <td><button onclick="downloadPayslip(${p.id})">Download</button></td>
+</tr>`;
+
+          });
+        }
+
+        html += `</tbody></table>`;
+        content.innerHTML = html;
+
+      }catch(err){
+        content.innerHTML = "<p>Error loading payroll data.</p>";
+        console.error(err);
+      }
+    } 
+    else if(page === 'performance'){
+      content.innerHTML = `<h2>Performance</h2><p>Coming soon...</p>`;
+    }
+  }
+
+  async function loadAttendanceChart(canvasId, type){
+    try{
+      const res2 = await fetch('/attendance_summary');
+      const summary = await res2.json();
+
+      const ctx = document.getElementById(canvasId).getContext('2d');
+      new Chart(ctx, {
+        type: type,
+        data: {
+          labels: ['Present', 'Absent', 'Leave'],
+          datasets: [{ 
+            label:'Days',
+            data: [summary.Present, summary.Absent, summary.Leave], 
+            backgroundColor:['#2ecc71','#e74c3c','#f1c40f'] 
+          }]
+        },
+        options: { 
+          responsive:true, 
+          plugins:{ legend:{position:'bottom'}, title:{display:true,text:'Attendance (Current Month)'} },
+          scales: type==='bar' ? { y:{beginAtZero:true, stepSize:1} } : {}
+        }
+      });
+    }catch(err){ console.error(err); }
+  }
+
+  function closeLeaveModal(){ document.getElementById('leaveModal').style.display='none'; }
+  async function submitLeave(){
+    const reason = document.getElementById('leave-reason').value.trim();
+    if(!reason){ alert("Please enter a reason"); return; }
+    const todayStr = new Date().toISOString().split('T')[0];
+    try{
+      const res = await fetch('/apply_leave', { 
+        method:'POST', 
+        headers:{'Content-Type':'application/json'}, 
+        body:JSON.stringify({date: todayStr, reason}) 
+      });
+      const data = await res.json();
+      alert(data.message);
+      closeLeaveModal();
+      loadPage('attendance-tracking');
+    }catch(err){ alert("Error submitting leave"); console.error(err); }
+  }
+
+  let currentUserId = null;
+  function openEditModal(id, name, email, role){
+    currentUserId = id;
+    document.getElementById('edit-name').value = name;
+    document.getElementById('edit-email').value = email;
+    document.getElementById('edit-role').value = role;
+    document.getElementById('edit-image').value = null;
+    document.getElementById('editModal').style.display = 'flex';
+  }
+
+  function closeEditModal(){ document.getElementById('editModal').style.display='none'; }
+
+  async function submitEdit(){
+    const name = document.getElementById('edit-name').value.trim();
+    const email = document.getElementById('edit-email').value.trim();
+    const role = document.getElementById('edit-role').value.trim();
+    const image = document.getElementById('edit-image').files[0];
+
+    if(!name || !email || !role){ alert("All fields are required"); return; }
+
+    const formData = new FormData();
+    formData.append('id', currentUserId);
+    formData.append('name', name);
+    formData.append('email', email);
+    formData.append('role', role);
+    if(image) formData.append('profile_pic', image);
+
+    try{
+      const res = await fetch(`/api/update_user/${currentUserId}`,  { method:'POST', body: formData });
+      const data = await res.json();
+      alert(data.message);
+      closeEditModal();
+      loadPage('personal-overview'); 
+    }catch(err){ alert("Error updating profile"); console.error(err); }
+  }
+
+  window.onload = () => { loadPage('personal-overview'); }
+  function downloadPayslip(payrollId){
+  window.open(`/download_payslip/${payrollId}`, "_blank");
+}
+
+  
+</script>
+
+</body>
+</html>

@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Department Management</h2>
+
+<!-- Add Department Form -->
+<div>
+    <input type="hidden" id="dept_id" value="">
+    <input type="text" id="dept_name" placeholder="Department Name">
+    <input type="text" id="dept_desc" placeholder="Description">
+    <button onclick="saveDepartment()">Save</button>
+</div>
+
+<!-- Department List -->
+<table border="1" style="margin-top:20px; width:50%;">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Name</th>
+            <th>Description</th>
+            <th>Action</th>
+        </tr>
+    </thead>
+    <tbody id="dept_table_body">
+        <!-- Rows loaded by JS -->
+    </tbody>
+</table>
+
+<script>
+async function loadDepartments() {
+    let res = await fetch('/api/departments');
+    let data = await res.json();
+    let tbody = document.getElementById('dept_table_body');
+    tbody.innerHTML = "";
+    data.forEach(d => {
+        let row = document.createElement('tr');
+        row.innerHTML = `
+            <td>${d.id}</td>
+            <td>${d.name}</td>
+            <td>${d.description || ""}</td>
+            <td>
+                <button onclick="editDepartment(${d.id}, '${d.name}', '${d.description || ""}')">Edit</button>
+                <button onclick="deleteDepartment(${d.id})">Delete</button>
+            </td>
+        `;
+        tbody.appendChild(row);
+    });
+}
+
+function editDepartment(id, name, desc) {
+    document.getElementById('dept_id').value = id;
+    document.getElementById('dept_name').value = name;
+    document.getElementById('dept_desc').value = desc;
+}
+
+async function saveDepartment() {
+    let id = document.getElementById('dept_id').value;
+    let name = document.getElementById('dept_name').value;
+    let desc = document.getElementById('dept_desc').value;
+
+    if (!name) {
+        alert("Department name is required");
+        return;
+    }
+
+    let method = id ? 'POST' : 'POST';
+    let body = { name, description: desc };
+    if (id) body.id = id;
+
+    let res = await fetch('/api/departments', {
+        method: method,
+        headers: {'Content-Type':'application/json'},
+        body: JSON.stringify(body)
+    });
+    let result = await res.json();
+    alert(result.message);
+    document.getElementById('dept_id').value = "";
+    document.getElementById('dept_name').value = "";
+    document.getElementById('dept_desc').value = "";
+    loadDepartments();
+}
+
+async function deleteDepartment(id) {
+    if (!confirm("Are you sure to delete this department?")) return;
+    let res = await fetch(`/api/departments/${id}`, { method: 'DELETE' });
+    let result = await res.json();
+    alert(result.message);
+    loadDepartments();
+}
+
+// Load on page load
+loadDepartments();
+</script>
+
+{% endblock %}
